@@ -1,3 +1,6 @@
+import newspaper
+
+
 print(4//3)
 # 몫 나타내기
 
