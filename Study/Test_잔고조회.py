@@ -428,7 +428,7 @@ class Kiwoom(QObject):
 
     @SyncRequestDecorator.kiwoom_sync_request
     def get_jango_data(self, prevNext, **kwargs):
-        self.SetInputValue("계좌번호", "8162697811")
+        self.SetInputValue("계좌번호", "8001688611")
         self.SetInputValue("비밀번호", "")
         self.SetInputValue("상장폐지조회구분", "0")
         self.SetInputValue("비밀번호입력매체구분", "00")

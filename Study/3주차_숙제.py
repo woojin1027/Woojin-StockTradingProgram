@@ -10,7 +10,6 @@ from time import sleep
 from json import dumps
 from os import kill, getpid
 
-
 class SyncRequestDecorator:
     """키움 API 비동기 함수 데코레이터
     """
@@ -25,7 +24,7 @@ class SyncRequestDecorator:
     @staticmethod
     def kiwoom_sync_callback(func):
         def func_wrapper(self, *args, **kwargs):
-            # print("[%s] 키움 함수 콜백: %s %s" % (func.__name__, args, kwargs))
+            #print("[%s] 키움 함수 콜백: %s %s" % (func.__name__, args, kwargs))
 
             func(self, *args, **kwargs)  # 콜백 함수 호출
             if self.request_thread_worker.request_thread_lock.locked():
@@ -57,7 +56,7 @@ class RequestThreadWorker(QObject):
         if self.retry_count == self.max_retry:
             kill(getpid(), 9)
 
-        # print("[%s] 키움 함수 재시도: %s %s" % (request[0].__name__, request[1], request[2]))
+        #print("[%s] 키움 함수 재시도: %s %s" % (request[0].__name__, request[1], request[2]))
 
         self.request_queue.appendleft(request)
 
@@ -92,7 +91,7 @@ class RequestThreadWorker(QObject):
             else:
                 last_request = request
                 # 요청 실행
-                # print("[%s] 키움 함수 실행: %s %s" % (request[0].__name__, request[1], request[2]))
+                #print("[%s] 키움 함수 실행: %s %s" % (request[0].__name__, request[1], request[2]))
                 request[0](trader, *request[1], **request[2])
 
             sleep(1)  # 0.2초 이상 대기 후 마무리
@@ -100,6 +99,7 @@ class RequestThreadWorker(QObject):
 
 class Kiwoom(QObject):
     # Variables
+    li_code_from_cond = [] # 조건식 결과종목 코드 리스트
 
     def __init__(self):
         super().__init__()
@@ -377,14 +377,14 @@ class Kiwoom(QObject):
 
     # 실시간 시세 이벤트
     def OnReceiveRealData(self, jongmokCode, realType, realData):
-        # print('_OnReceiveRealData', jongmokCode, realType, realData)
+        #print('_OnReceiveRealData', jongmokCode, realType, realData)
         pass
 
     # 체결데이터를 받은 시점을 알려준다.
     # sGubun – 0:주문체결통보, 1:잔고통보, 3:특이신호
     # sFidList – 데이터 구분은 ‘;’ 이다.
     def OnReceiveChejanData(self, gubun, itemCnt, fidList):
-        # print('_OnReceiveChejanData()', gubun, itemCnt, fidList)
+        #print('_OnReceiveChejanData()', gubun, itemCnt, fidList)
         pass
 
     # 로컬에 사용자조건식 저장 성공여부 응답 이벤트
@@ -400,18 +400,29 @@ class Kiwoom(QObject):
         print('_OnReceiveRealCondition()', code, strType, conditionName, conditionIndex)
 
     @SyncRequestDecorator.kiwoom_sync_callback
-    def OnReceiveTrCondition(self, scrNo, codeList, conditionName, index, next, **kwargs):
+    def OnReceiveTrCondition(self, scrNo, codeList, conditionName, index, next):
         print('_OnReceiveTrCondition()', scrNo, codeList, conditionName, index, next)
 
-        # 조건식 결과 출력
-        print(codeList)
+        # 조건식 결과 li_code_from_cond에 리스트로 저장
+        self.li_code_from_cond = codeList.split(';')[:-1]
 
     # Tran 수신시 이벤트
     @SyncRequestDecorator.kiwoom_sync_callback
-    def OnReceiveTrData(self, scrNo, rQName, trCode, recordName, prevNext, dataLength, errorCode, message, splmMsg,
-                        **kwargs):
+    def OnReceiveTrData(self, scrNo, rQName, trCode, recordName, prevNext, dataLength, errorCode, message, splmMsg):
         print('OnReceiveTrData()', scrNo, rQName, trCode, recordName, prevNext, dataLength, errorCode, message,
               splmMsg)
+
+        if rQName == "주식정보":
+            # PER, PBR 정보 획득
+            name = self.GetCommData(trCode, rQName, 0, "종목명").strip()
+            code = self.GetCommData(trCode, rQName, 0, "종목코드").strip()
+
+            print("종목명: %s 종목코드: %s"%(name, code))
+
+    @SyncRequestDecorator.kiwoom_sync_request
+    def get_opt10001(self, code):
+        self.SetInputValue("종목코드", code)
+        self.CommRqData("주식정보", "opt10001", 0, "0105")
 
 
 class SpartaQuant(QMainWindow):
@@ -427,7 +438,7 @@ class SpartaQuant(QMainWindow):
         ###############################
         # 1. 로그인                    #
         ###############################
-
+        
         # 로그인 시도
         self._kiwoom.CommConnect()
 
@@ -437,39 +448,52 @@ class SpartaQuant(QMainWindow):
                 break
             print("로그인 대기 중...")
             sleep(5)
-
         sleep(5)
+
         ###############################
         # 2. 조건식 결과 가져오기        #
         ###############################
-
         # 조건식 불러오기
         self._kiwoom.GetConditionLoad()
-
-        # 조건식 리스트 가져오기 (res="000^스파르타;001^조건식1;002^조건식2;...")
+        
+        # 조건식 리스트 가져오기
         res = self._kiwoom.GetConditionNameList()
         print(res)
         res = res.split(';')
-        print(res)
-
-        # 조건식 중 'TEST' 조건식 존재여부 확인
+        
+        # 조건식 중 '스파르타' 조건식 존재여부 확인
         condition_index = None
         condition_name = None
 
         for name in res:
-            if 'test' in name:
+            if 'TEST' in name:
                 [condition_index, condition_name] = name.split('^')
                 break
 
         if condition_index == None or condition_name == None:
             print("Can't find a condition.")
             exit(0)
-
+        
         print("조건식:", condition_name, "번호:", condition_index)
-
-        # '스파르타' 조건식 결과 요청하기
+        
+        # '스파르타' 조건식 결과 가져오기 요청
         condition_index = int(condition_index)
         self._kiwoom.SendCondition("0156", condition_name, condition_index, 0)
+        
+        # 조건식 가져오기 완료 대기
+        while len(self._kiwoom.li_code_from_cond) == 0:
+            sleep(1)
+        sleep(1)
+
+        print("종목 리스트: ", self._kiwoom.li_code_from_cond)
+
+        ###############################
+        # 3. 종목 정보 가져오기          #
+        ###############################
+        # 각 종목별 주식기본정보요청
+        for code in self._kiwoom.li_code_from_cond:
+            self._kiwoom.get_opt10001(code)
+
 
 if __name__ == "__main__":
     app = QApplication(argv)
